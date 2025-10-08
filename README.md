@@ -33,10 +33,10 @@ Then install project dependencies. For scientific projects, so you can use the J
 uv pip install -e ".[sci]"
 ```
 
-Finally, install chromatix for AD-compatible XPC forward modeling:
+Finally, install Chromatix for AD-compatible XPC forward modeling:
 
 ```bash
-pip install git+https://github.com/chromatix-team/chromatix.git
+uv pip install git+https://github.com/chromatix-team/chromatix.git
 ```
 
 ## Usage
