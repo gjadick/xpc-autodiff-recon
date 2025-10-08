@@ -1,0 +1,19 @@
+init_val: 1e-3
+optimizer: adam
+learning_rate: 0.04
+epsilon: 1e-5
+w_l1_mat1: 5e-6
+w_l1_mat2: 1e-4
+w_tv_mat1: 1e-5
+w_tv_mat2: 1e-5
+phantom: make_raw_phantom(Nx, p0=0.7, p1=0.2, p2=0.1, id2=2, c1=1, c2=3)
+Nx: 64
+Ny: 20
+Nz: 64
+Na: 100
+mat1: tissue
+mat2: bone
+density1: 1.06
+density2: 1.92
+dtype: float32
+prngkey: 3

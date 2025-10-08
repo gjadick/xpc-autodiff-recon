@@ -1,0 +1,13 @@
+ ***Tissue***
+        & SSIM                      & RMSE                      \\
+        & Optimization  &  TIE/FBP  & Optimization  &  TIE/FBP  \\
+   0 mm &         0.82  &     0.00  &         0.25  &     5.00  \\
+  50 mm &         0.63  &     0.34  &         0.20  &     0.22  \\
+ 100 mm &         0.54  &     0.22  &         0.21  &     0.36  \\
+
+ ***Bone***
+        & SSIM                      & RMSE                      \\
+        & Optimization  &  TIE/FBP  & Optimization  &  TIE/FBP  \\
+   0 mm &         1.00  &     0.06  &         0.02  &     0.32  \\
+  50 mm &         0.94  &     0.33  &         0.04  &     0.11  \\
+ 100 mm &         0.83  &     0.21  &         0.04  &     0.17  \\
