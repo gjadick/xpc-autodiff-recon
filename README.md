@@ -39,6 +39,11 @@ Finally, install Chromatix for AD-compatible XPC forward modeling:
 uv pip install git+https://github.com/chromatix-team/chromatix.git
 ```
 
+For working with Jupyter notebooks, you can set up an ipykernel to make sure you're in the right environment:
+```bash
+python -m ipykernel install --user --name xpc --display-name "Python (xpc)"
+```
+
 ## Usage
 
 In your own projects, just `import xpc`. A variety of example projects and conference/paper data are in the base directory.
