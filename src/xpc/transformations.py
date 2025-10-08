@@ -1,6 +1,5 @@
 from jax import Array
 import jax.numpy as jnp
-
 from jax.scipy.ndimage import map_coordinates
 
 
@@ -51,3 +50,15 @@ def rotate_volume(volume: Array, angle: float) -> Array:
     angle in radians."""
     rotated_grid = volume_homogeneous_grid(volume) @ Ry(angle, volume.dtype).T
     return resample(volume, rotated_grid[..., :3])
+
+
+def rotate_volume_4d(volume: Array, angle: float) -> Array:
+    """Rotates a volume around the y axis (axis 1).
+    angle in radians.
+    The last axis can be used for batching (e.g. multi-wavelength).
+    """
+    rotated_volume = jnp.zeros(volume.shape)
+    rotated_grid = volume_homogeneous_grid(volume[:,:,:,0]) @ Ry(angle, volume.dtype).T
+    for i in range(volume.shape[-1]):
+        rotated_volume = rotated_volume.at[:,:,:,i].set(resample(volume[:,:,:,i], rotated_grid[..., :3]))
+    return rotated_volume
