@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from jax.scipy.signal import convolve2d
+# from jax.scipy.signal import convolve2d   # produces error? use `convolve2d_diy` below
 
 PI = jnp.pi
 
@@ -40,6 +40,17 @@ def lorentzian2D(x, y, fwhm, normalize=True):
     return kernel
 
 
+def convolve2d_diy(img, kernel):
+    """Convolve two 2D arrays with scipy-like mode='same'."""
+    H, W = img.shape
+    KH, KW = kernel.shape
+    F = jnp.fft.rfft2(img, s=(H+KH-1, W+KW-1))
+    G = jnp.fft.rfft2(kernel, s=(H+KH-1, W+KW-1))
+    out = jnp.fft.irfft2(F * G, s=(H+KH-1, W+KW-1))
+    oh, ow = (KH-1)//2, (KW-1)//2   # center crop (mode='same')
+    return out[oh:oh+H, ow:ow+W]
+    
+
 def apply_psf(img, FOV, dx, fwhm=None, kernel_width=1, psf='lorentzian'):
     """ Apply a PSF to an image."""
 
@@ -62,7 +73,7 @@ def apply_psf(img, FOV, dx, fwhm=None, kernel_width=1, psf='lorentzian'):
         kernel = gaussian2D(x, x, fwhm)
         
     img_pad = jnp.pad(img, kernel.shape, constant_values=img[0,0])    # pad img to account for fillvalue = 0. Corner [0,0] pixel might be bad idea?
-    img_nonideal_pad = convolve2d(img_pad, kernel, mode='same')
+    img_nonideal_pad = convolve2d_diy(img_pad, kernel)
     img_nonideal = img_nonideal_pad[kernel.shape[0]:-kernel.shape[0], kernel.shape[1]:-kernel.shape[1]]
         
     return img_nonideal
