@@ -90,6 +90,7 @@ For reference, example usage of periodictable to get delta, beta:
 import os
 import re
 import numpy as np
+import jax.numpy as jnp
 from pathlib import Path
 
 rootpath = Path(__file__).parent / 'xscatter_data'
@@ -472,3 +473,30 @@ def get_dbm_mix(matcomp, energy, density):
     wavenum = get_wavenum(energy)
     mu = 2 * wavenum * beta
     return delta, beta, mu
+
+
+class Material:
+    def __init__(self, name, matcomp, density):
+        self.name = name
+        self.matcomp = matcomp
+        self.density = density
+
+        # pre-calculate delta, beta at a representative range of energies to avoid file reloading
+        self.energy_range = jnp.linspace(1, 150, 150)
+        self.delta_range, self.beta_range = get_delta_beta_mix(matcomp, self.energy_range, density)
+        
+    def delta_beta(self, energy):
+        """
+        Returns linearly interpolated delta and beta at the given energy.
+        """
+        delta = jnp.interp(energy, self.energy_range, self.delta_range)
+        beta = jnp.interp(energy, self.energy_range, self.beta_range)
+        return delta, beta
+
+
+        
+
+
+
+
+    
