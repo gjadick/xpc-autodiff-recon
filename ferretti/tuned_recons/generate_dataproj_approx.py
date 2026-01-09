@@ -75,16 +75,16 @@ class ProjPBI(nn.Module):
     # Phantom
     phantom_Nx: int = 64#64
     phantom_Ny: int = 30#30
-    phantom_dx: float = 0.5e-6
+    phantom_dx: float = 0.25e-6
     phantom_fov = phantom_dx * phantom_Nx
-    up_samp_fac: int = 1
+    up_samp_fac: int = 2
     # Detector
     det_Nx: int = 64#64  # 32 -- TODO: should have det_N < phantom_N, but need to account for this in phantom init during recon!    
     det_Ny: int = 30#30  # 10
     det_fwhm: float = 1e-6
     det_psf: str = 'lorentzian'  # code for the PSF is in fun.py
     resampling_method: str = 'linear'
-    I0: int = 1e8  # very low noise to start
+    I0: int = 1e8 # very low noise to start
     det_fov: float = phantom_fov
     det_dx: float = det_fov / det_Nx
     
@@ -116,7 +116,6 @@ class ProjPBI(nn.Module):
         volume = jnp.repeat(jnp.repeat(jnp.repeat(self.volume,up_samp_fac,axis=0),up_samp_fac,axis=1),up_samp_fac,axis=2)
         N_pad = self.N_pad 
         total_pad = N_pad*up_samp_fac
-        volume = jnp.pad(volume,((total_pad,total_pad),(total_pad,total_pad),(0,0),(0,0)),'constant', constant_values=0)
     
         # TODO (for AD recon)
         ## -- the initial phantom volume will match detector geometry
@@ -141,8 +140,8 @@ class ProjPBI(nn.Module):
         )(volume, -1*angle)
         rotated_vol = jnp.swapaxes(jnp.stack([rotated_vol[0], rotated_vol[1]], axis=-1), 1, 2)
 
-        beta_proj = jnp.sum(rotated_vol[:,:,:,0],axis=1)[None,:,:,None,None]
-        dn_proj = jnp.sum(rotated_vol[:,:,:,1],axis=1)[None,:,:,None,None]
+        beta_proj = jnp.pad(jnp.sum(rotated_vol[:,:,:,0],axis=1)[None,:,:,None,None],((0,0),(total_pad,total_pad),(total_pad,total_pad),(0,0),(0,0)),'constant', constant_values=0)
+        dn_proj = jnp.pad(jnp.sum(rotated_vol[:,:,:,1],axis=1)[None,:,:,None,None],((0,0),(total_pad,total_pad),(total_pad,total_pad),(0,0),(0,0)),'constant', constant_values=0)
 
         #dn_proj = dn_proj[newaxis,:,jnp.newaxis]
         #beta_proj = beta_proj[jnp.newaxis,:,jnp.newaxis]
@@ -222,7 +221,11 @@ for i in range(len(ax)):
 fig.colorbar(m)
 plt.show()
 
-
-np.save('noisy_projection_data_proj_approx', data)
+#small_pixel_low_noise_projection_data_proj_approx
+np.save('small_pixel_low_noise_projection_data_proj_approx', data)
 np.save('projection_angles', thetas)
+
+
+
+
 

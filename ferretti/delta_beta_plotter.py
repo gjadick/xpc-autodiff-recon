@@ -11,10 +11,10 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 #vol_grid = np.load('beta_tv_search_vols.npy')
 #vol_grid = np.load('/home/aeferretti/variation_lr_scheduling_beta_search_2500_10000_20_vols.npy')
-vol_grid = np.load('/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/proj_variation_lr_scheduling_improv_guess_tv_4_vols.npy')
+vol_grid = np.load('/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/proj_variation_lr_scheduling_improv_guess_tv_5_vols.npy')
 
-I = 6  #6
-J = 9  #1
+I = 5 #6
+J = 4 #1
 K = 0
 L = 0
 slice_no = 15

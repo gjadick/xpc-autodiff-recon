@@ -34,9 +34,24 @@ from flax import linen as nn
 from flax.core import unfreeze, freeze
 
 from xpc.psf import apply_psf
+#from psf_scipy import apply_psf
 from xpc.transformations import rotate_volume
 from xpc.xscatter import Material, get_wavenum, get_wavelen
 %matplotlib qt5
+
+
+
+"""
+My preferred version of the point spread function blurring; it aims to use the 
+padded field values in the pad for the blurring rather than an arbitrary constant.
+
+One should also be careful that the blurring does not cause a shift in the 
+center of the data; some old code I found in this repo actually shifted the data.
+which caused the reconstructed phantom to be shifted relative to where it should be. 
+"""
+
+
+
 
 tissue = Material('tissue', 'H(10.2)C(14.3)N(3.4)O(70.8)Na(0.2)P(0.3)S(0.3)Cl(0.2)K(0.3)', 1.06)
 adipose = Material('adipose', 'H(11.4)C(59.8)N(0.7)O(27.8)Na(0.1)S(0.1)Cl(0.1)', 0.95) 
@@ -72,25 +87,26 @@ class MultiSlicePBI(nn.Module):
              
     # Phantom
     phantom_Nx: int = 64 
-    phantom_Ny: int = 30 
-    phantom_dx: float = 0.1e-5
+    phantom_Ny: int = 30
+    phantom_dx: float = 0.5e-6
     phantom_fov = phantom_dx * phantom_Nx
     up_samp_fac: int = 2 
     # Detector
     det_Nx: int = 64  # 32 -- TODO: should have det_N < phantom_N, but need to account for this in phantom init during recon!    
     det_Ny: int = 30  # 10
-    det_fwhm: float = 1e-6
+    det_fwhm: float = 1e-10
     det_psf: str = 'lorentzian'  # code for the PSF is in fun.py
     resampling_method: str = 'linear'
-    I0: int = 1e8 # very low noise to start
+    I0: int = 1e8  # very low noise to start #call 1e4 high noise
     det_fov: float = phantom_fov
     det_dx: float = det_fov / det_Nx
-    
+
     # Misc.
     wavelen = get_wavelen(energy)
     N_pad: int = 16   # note -- this is probably pushing the lower end of acceptable. Need to check?
     n_medium: float = 1
     cval = 1 + 0j
+    kernel_size_buffer: int = 16
 
     def setup(self):
         
@@ -103,20 +119,17 @@ class MultiSlicePBI(nn.Module):
 
         # function to resample source field to detectory geometry
         self.det_resample_func = init_plane_resample(
-            (self.det_Nx, self.det_Ny), 
-            (self.det_dx, self.det_dx), 
+            (self.det_Nx + self.kernel_size_buffer, self.det_Ny + self.kernel_size_buffer), 
+            (self.det_dx, self.det_dx ), 
             resampling_method=self.resampling_method
         )
+
     
     def __call__(self, angle: float) -> Array:
 
         up_samp_fac = self.up_samp_fac  # do upsampling. Look to do a linear upsampling later
         volume = jnp.repeat(jnp.repeat(jnp.repeat(self.volume,up_samp_fac,axis=0),up_samp_fac,axis=1),up_samp_fac,axis=2)
         N_pad = self.N_pad 
-        # TODO (for AD recon)
-        ## -- the initial phantom volume will match detector geometry
-        ## -- then, upsample the volume from detector res to phantom res for accurate forward project.
-        ## -- currently, this takes an already upsampled phantom (not compatible with good recon)
         
         # incident wave
         field = cx.plane_wave(
@@ -145,9 +158,18 @@ class MultiSlicePBI(nn.Module):
 
         # to detector
         det_field = cx.transfer_propagate(exit_field, self.propdist, self.n_medium, 0, cval=model.cval, mode='same')
+
         img = self.det_resample_func(det_field.intensity.squeeze()[...,None,None], field.dx.ravel()[:1])[...,0,0]
         img = img / (self.det_dx/(self.phantom_dx/up_samp_fac))**2  # normalize counts to new pixel size
-        img = img.swapaxes(0,1)      
+        #img = jax.random.poisson(key, self.I0*img, img.shape) / self.I0  # noise
+        img = apply_psf(img, self.det_fov, self.det_dx, psf=self.det_psf, fwhm=self.det_fwhm, kernel_width=0.09)
+        img = img[8:img.shape[0]-8,8:img.shape[1]-8]
+
+        
+        # detector nonidealities
+        # imgs = jax.random.poisson(key, self.I0*imgs, imgs.shape) / self.I0  # noise
+        
+        img = img.swapaxes(0,1)
 
         # TODO - consider cropping the top/bottom few rows (interference at cylinder bounds?)
         return img
@@ -216,9 +238,6 @@ fig.colorbar(m)
 plt.show()
 
 
-np.save('large_pix_projection_data_low_noise', data)
+np.save('blurred_high_noise_projection_data', data)  #blurred_projection_data.npy #noisy_no_blur_projection_data
 np.save('projection_angles', thetas)
 
-fren_no = (model.phantom_dx)**2/(model.phantom_fov * model.wavelen)
-
-print(f'Fresnel Number: {fren_no}')

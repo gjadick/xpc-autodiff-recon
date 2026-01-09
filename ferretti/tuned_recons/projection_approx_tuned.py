@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -54,7 +55,7 @@ class ProjPBI(nn.Module):
     phantom_Ny: int = 30#30
     phantom_dx: float = 0.5e-6
     phantom_fov = phantom_dx * phantom_Nx
-    up_samp_fac: int = 1
+    up_samp_fac: int = 2
     # Detector
     det_Nx: int = 64#64  # 32 -- TODO: should have det_N < phantom_N, but need to account for this in phantom init during recon!    
     det_Ny: int = 30#30  # 10
@@ -93,7 +94,6 @@ class ProjPBI(nn.Module):
         volume = jnp.repeat(jnp.repeat(jnp.repeat(self.volume,up_samp_fac,axis=0),up_samp_fac,axis=1),up_samp_fac,axis=2)
         N_pad = self.N_pad 
         total_pad = N_pad*up_samp_fac
-        volume = jnp.pad(volume,((total_pad,total_pad),(total_pad,total_pad),(0,0),(0,0)),'constant', constant_values=0)
     
         # TODO (for AD recon)
         ## -- the initial phantom volume will match detector geometry
@@ -118,8 +118,8 @@ class ProjPBI(nn.Module):
         )(volume, -1*angle)
         rotated_vol = jnp.swapaxes(jnp.stack([rotated_vol[0], rotated_vol[1]], axis=-1), 1, 2)
 
-        beta_proj = jnp.sum(rotated_vol[:,:,:,0],axis=1)[None,:,:,None,None]
-        dn_proj = jnp.sum(rotated_vol[:,:,:,1],axis=1)[None,:,:,None,None]
+        beta_proj = jnp.pad(jnp.sum(rotated_vol[:,:,:,0],axis=1)[None,:,:,None,None],((0,0),(total_pad,total_pad),(total_pad,total_pad),(0,0),(0,0)),'constant', constant_values=0)
+        dn_proj = jnp.pad(jnp.sum(rotated_vol[:,:,:,1],axis=1)[None,:,:,None,None],((0,0),(total_pad,total_pad),(total_pad,total_pad),(0,0),(0,0)),'constant', constant_values=0)
 
         #dn_proj = dn_proj[newaxis,:,jnp.newaxis]
         #beta_proj = beta_proj[jnp.newaxis,:,jnp.newaxis]
@@ -173,10 +173,15 @@ def show_compare(params, loss, kw={}):
     
     
     
-    
+
 #Read in data and geometyr 
-data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/noisy_projection_data.npy') 
+#data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon_bak/ferretti/tuned_recons/noisy_projection_data.npy') 
+#data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/high_noise_projection_data.npy') 
 #data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/noisy_projection_data_proj_approx.npy')
+#data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/projection_data_low_noise.npy') 
+#data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/projection_data_high_noise.npy') 
+#data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/projection_data_low_noise.npy')
+data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/projection_data_low_noise.npy') #small_pix_
 thetas = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/projection_angles.npy')
 
 # Number of epochs with no improvement after which learning rate will be reduced:
@@ -213,8 +218,8 @@ optimizer = optax.chain(
 
 
 # TODO -- tune the regularization weights. For now, all regularization is "off"
-w_tv_beta = 966 #750 #500 #000#1044
-w_tv_delta = 1166 #1614.2858 #10#5 450
+w_tv_beta = 1500 #1070 # #966 #750 #500 #000#1044
+w_tv_delta = 1210 #780 #1614.2858 #10#5 450
 w_l1_beta = 0 #-400 #10#00#10
 w_l1_delta = 0#-200 #10#1000 #5
 w_edge = 0.000 #0.001
@@ -223,12 +228,12 @@ def loss_fn(params, data):
     vol_beta, vol_delta = vol[:,:,:,0], vol[:,:,:,1]   
     y_k = forward(params, thetas)   
     L2_norm = jnp.sqrt(jnp.sum((y_k - data)**2)) 
-    L1_delta_term = w_l1_delta*L1(vol_delta)            
-    L1_beta_term = w_l1_beta*L1(vol_beta)
+    #L1_delta_term = w_l1_delta*L1(vol_delta)            
+    #L1_beta_term = w_l1_beta*L1(vol_beta)
     TV_delta_term = w_tv_delta*TV(vol_delta)
     TV_beta_term = w_tv_beta*TV(vol_beta)
-    egde_penalty = w_edge *(jnp.abs(vol_delta/np.max(vol_delta) - vol_beta/np.max(vol_beta)).sum())
-    loss = L2_norm + L1_delta_term + L1_beta_term + TV_delta_term + TV_beta_term + egde_penalty
+    #egde_penalty = w_edge *(jnp.abs(vol_delta/np.max(vol_delta) - vol_beta/np.max(vol_beta)).sum())
+    loss = L2_norm + TV_delta_term + TV_beta_term  #+ egde_penalty + L1_delta_term + L1_beta_term 
     return loss
 
 
@@ -276,9 +281,6 @@ while lr_scale > 0.001 or iter_k > max_iter:
     print(lr_scale)
 
 
-
-np.save('proj_approx_image',params['params']['volume'])
+#very_small_pixel_
+np.save('low_noise_proj_approx_image_2',params['params']['volume'])
 show_compare(params, loss)  
-
-
-

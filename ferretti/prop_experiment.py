@@ -87,15 +87,16 @@ resampling_method: str = 'linear'
 I0: int = 1e8  # very low noise to start
 det_fov: float = phantom_fov
 det_dx: float = det_fov / det_Nx
-
+n = 1
+kernel_size = 16
 # Misc.
 wavelen = get_wavelen(energy)
 N_pad: int = 16  # note 8-- this is probably pushing the lower end of acceptable. Need to check?
 n_medium: float = 1
 cval = 1 + 0j
 det_resample_func = init_plane_resample(
-    (det_Nx, det_Ny), 
-    (det_dx, det_dx), 
+    (det_Nx + kernel_size, det_Ny + kernel_size), 
+    (det_dx, det_dx ), 
     resampling_method=resampling_method
 )
 
@@ -163,6 +164,9 @@ for i in range(len(up_samp_facs)):
     det_field = cx.transfer_propagate(exit_field, propdist, n_medium, 0, cval=cval, mode='same')
     img = det_resample_func(det_field.intensity.squeeze()[...,None,None], field.dx.ravel()[:1])[...,0,0]
     img = img / (det_dx/(phantom_dx/up_samp_fac))**2  # normalize counts to new pixel size
+    img = apply_psf(img, det_fov, det_dx, psf=det_psf, fwhm=det_fwhm, kernel_width=0.09)
+    img = img[8:img.shape[0]-8,8:img.shape[1]-8]
+    
     img = img.swapaxes(0,1)
     
     print(f'exicution time was {time()-t1}')

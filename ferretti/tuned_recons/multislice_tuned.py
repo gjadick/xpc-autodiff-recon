@@ -52,7 +52,7 @@ class MultiSlicePBI(nn.Module):
     # Phantom
     phantom_Nx: int = 64 
     phantom_Ny: int = 30 
-    phantom_dx: float = 0.5e-6
+    phantom_dx: float = 0.25e-6
     phantom_fov = phantom_dx * phantom_Nx
     up_samp_fac: int = 2 
     # Detector
@@ -67,7 +67,7 @@ class MultiSlicePBI(nn.Module):
     
     # Misc.
     wavelen = get_wavelen(energy)
-    N_pad: int = 16   # note -- this is probably pushing the lower end of acceptable. Need to check?
+    N_pad: int = 5   # note -- this is probably pushing the lower end of acceptable. Need to check?
     n_medium: float = 1
     cval = 1 + 0j
 
@@ -170,7 +170,10 @@ def show_compare(params, loss, kw={}):
     
     
 #Read in data and geometyr 
-data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/noisy_projection_data.npy') 
+#data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/noisy_projection_data.npy') 
+#data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/projection_data_high_noise.npy') 
+#data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/projection_data_low_noise.npy') 
+data = np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/small_pix_projection_data_low_noise.npy')
 thetas= np.load(r'/home/aeferretti/rotations/fall/xpc-autodiff-recon/ferretti/tuned_recons/projection_angles.npy')
 
 # Number of epochs with no improvement after which learning rate will be reduced:
@@ -206,8 +209,8 @@ optimizer = optax.chain(
 
 
 # TODO -- tune the regularization weights. For now, all regularization is "off"
-w_tv_beta = 2500 #000#10
-w_tv_delta = 500 #1614.2858 #10#5
+w_tv_beta = 1070 #2500 #000#10
+w_tv_delta = 780 #500 #1614.2858 #10#5
 w_l1_beta = 0 #-400 #10#00#10
 w_l1_delta = 0#-200 #10#1000 #5
 w_edge = 0.000 #0.001
@@ -267,9 +270,7 @@ while lr_scale > 0.001 or iter_k > max_iter:
     print(lr_scale)
 
 
+np.save('test_small_pixel_high_noise_multislice_image',params['params']['volume'])
+show_compare(params, loss)  #!/usr/bin/env python3
 
-np.save('multislice_image',params['params']['volume'])
-show_compare(params, loss)  
-
-
-
+#show_compare(params, loss)  
