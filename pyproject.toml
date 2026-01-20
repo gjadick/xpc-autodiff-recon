@@ -10,7 +10,7 @@ description = "X-ray physics utils: material-dependent scatter coefficients and 
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
-dependencies = ["einops >= 0.6.0", "flax >= 0.6.3", "chex>=0.1.5", "optax >=0.1.4", "jaxopt>=0.8"]
+dependencies = ["einops >= 0.6.0", "flax >= 0.6.3", "chex>=0.1.5", "optax >=0.1.4", "jaxopt>=0.8", "xraydb>=4.5.8"]
 
 [project.optional-dependencies]
 sci = ["numpy>=1.26", "matplotlib>=3.8", "scipy>=1.10.0", "jupyter", "ipykernel"]
