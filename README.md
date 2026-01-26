@@ -36,7 +36,7 @@ uv pip install -e ".[sci]"
 Finally, install Chromatix for AD-compatible XPC forward modeling:
 
 ```bash
-uv pip install git+https://github.com/chromatix-team/chromatix.git
+uv pip install "git+https://github.com/chromatix-team/chromatix.git@0.3.0"
 ```
 
 For working with Jupyter notebooks, you can set up an ipykernel to make sure you're in the right environment:
