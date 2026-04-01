@@ -6,103 +6,23 @@ Last updated on Thu Aug 5 12:37:00 2024
 
 @author: gjadick
 
-A script for retrieving complex index of refraction values
-in the soft x-ray energy range.
+X-ray optics helper functions and other things (e.g. material compositions).
 
-
-#####################################################################
-### EXAMPLE USAGE
-#####################################################################
-
-To get delta and beta factors for water as a function of energy:
-
-```
-energies = np.arange(1., 140., 1.)  # array of energy in keV
-material = 'H(88.8)O(11.2)'         # water composition
-density = 1.0                       # material density in g/cm^3
-
-delta, beta = get_delta_beta_mix(matcomp, energies, density)
-```
-
-
-#####################################################################
-### NOTES
-##################################################################### 
-
-This script relies on the EPDL97 database of Photon Anomalous 
-Scattering Factors found at:
-    https://www-nds.iaea.org/epdl97/
-    
-To access the database, each element's data has been saved here in 
-a separate text file. As explained by IAEA, the file format is:
-
-    The first line defines,
-    1)  The Atomic Number of the Element (Z = 1 for hydrogen)
-    2)  The Number of Tabulated Energy Points (361)
-    3)  The Atomic Weight of the Naturally Occurring Element (1.008)
-    4)  The STP Density in grams/cc (8.988e-5)
-    5)  Definition of the Element in text (1-H -Nat)  
-     
-    The Second Line contains titles for each Column
-    1)  MeV - the units of Energy
-    2)  F1-Total - Total f1 (sum of ionization and excitation)
-    3)  Z+F1 - In this form it is easier to see FF+F1 approaching zero at low energy.   
-    4)  F1-Ionize - Contribution of Ionization to f1
-    5)  F1-Excite - Contribution of Excitation to f1
-    6)  F2-Total - Total f2 (sum of ionization and excitation)
-    7)  F2-Ionize - Contribution of Ionization to f2
-    8)  F2-Excite - Contribution of Excitation to f2
-    9)  Coherent (barns) - Coherent Cross Section defined by integrating the above equation.
-
-As validation of this script, it's useful to know that the package 
-`periodictable` includes a method for getting scatter factors. However, it uses
-a different database, which is generally considered less accurate at >30 keV.
-    B. L. Henke, E. M. Gullikson, and J. C. Davis. “X-ray interactions: 
-    photoabsorption, scattering, transmission, and reflection at 
-    E=50-30000 eV, Z=1-92”, Atomic Data and Nuclear Data Tables 54 no.2, 
-    181-342 (July 1993).
-    
-In fact, the periodictable package doesn't provide any values above 30 keV. 
-As a check, I confirmed that the Henke 1993 values match the EPDL97-based 
-values computed in this script reasonably well at the available energies. 
-
-For reference, example usage of periodictable to get delta, beta:
-    ```
-    import periodictable as pt 
-    import periodictable.xsf
-    
-    # Example material is PMMA -- this is the xscatter formatting:
-    matcomp = 'H(8.0541)C(59.9846)O(31.9613)' 
-    density =  1.19  # [g/cm^3]
-    
-    # To use periodictable, define PMMA in this format:
-    elem = periodictable.formula('8.0541%wt H // 59.9846% C // O')
-    elem.density = density 
-
-    # Get the complex index of refraction:
-    n = pt.xsf.index_of_refraction(elem, energy=my_energy_values)
-    delta = 1 - n.real
-    beta = -n.imag
-    ```
     
 """
 
-import os
-import re
 import numpy as np
-import jax.numpy as jnp
-from pathlib import Path
-
-rootpath = Path(__file__).parent / 'xscatter_data'
+import xraydb
 
 
 ### CONSTANTS
 r_e = 2.8179403262e-15        # classical electron radius, m
 N_A = 6.02214076e+23          # Avogadro's number, num/mol
-pi = np.pi
+PI = np.pi
 h  = 6.62607015e-34           # Planck constant, J/Hz
 c = 299792458.0               # speed of light, m/s
 J_eV = 1.602176565e-19        # J per eV conversion
+
 
 elements =  ['H','He','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si',\
     'P','S','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn',\
@@ -130,7 +50,7 @@ def get_wavenum(energy):
         energy = np.array(energy)
     except:
         pass  
-    return 2*np.pi / get_wavelen(energy)
+    return 2*PI / get_wavelen(energy)
 
 
 def get_energy(wavelen):
@@ -143,360 +63,228 @@ def get_energy(wavelen):
     return 1e-3*h*c / (wavelen*J_eV)
 
 
-def get_filename(elem):
-    """
-    Get the filename with data for a given element.
-
-    INPUTS:
-    elem - short element name (str)
-           e.g. for Hydrogen, elem='H'
-
-    OUTPUTS:
-    filename - the path to the data file
-    """
-    Z = elements.index(elem)+1
-    filename =  str(rootpath / f'za{int(Z):03}000.txt')
-    return filename
-
-
-def to_float(s):
-    '''
-    Convert an EPDL97-formatted number to a float.
-    Their scientific notation format for "X * 10^-Y" 
-    is "X-Y", or for "X * 10+Y" it is "X+Y", 
-    neither of which can convert to float using 
-    Python type casting alone.
-    
-    Perhaps this function is excessively convoluted;
-    I welcome simpler solutions.
-    '''
-    try:    # attempt type casting
-        result = float(s)
-    except: # convert string
-        # check for negative val
-        sign = 1
-        if s[0]=='-':
-            sign = -1 
-            s = s[1:]
-        # get power
-        if len(s[1:].split('+'))==2:
-            split_char = '+'
-            pow_sign = 1.0
-        elif len(s[1:].split('-'))==2:
-            split_char = '-'
-            pow_sign = -1.0
-        else:
-            print('FLOAT CONVERSION ERROR', s)
-            return None
-        # calc float
-        A = float(s.split(split_char)[0])
-        pow = pow_sign * float(s.split(split_char)[1])
-        result = sign * A * 10**pow
-        
-    return result
-
-
-def get_amass(elem):
-    """
-    Finds the atomic mass of an element in g/mole.
-
-    INPUTS:
-    elem - short element name (str)
-           e.g. for Hydrogen, elem='H'
-    
-    OUTPUTS:
-    amass - double specifiying atomic mass in grams per mole
-    """
-    with open(get_filename(elem)) as f:
-        amass = to_float(f.readline().split()[2])
-    return amass
-
-
-def get_f1_f2(elem, energy):
-    """
-    Get energy-dependent anomalous scatter factors for a single element.
-
-    INPUTS:
-    elem - short element name (str)
-           e.g. for Hydrogen, elem='H'
-    energy - energies at which to evaluate factors 
-             (number or list/array of numbers)
-    
-    OUTPUTS:
-    f1, f2 - arrays of scatter factors as function of energy
-    """
-    try:
-        len(energy)
-        energy = np.array(energy)
-    except:
-        pass
-        
-    n = 10  # number of characters per column in data file
-    with open(get_filename(elem)) as f:
-        data = np.array([[line[i:i+n] for i in range(0, len(line)-1, n)] for line in f.readlines()[2:]]).T
-
-    # Get table of keV, f1, f2
-    keV_0 = 1000 * np.array([to_float(x) for x in data[0]])
-    f1_0 = np.array([to_float(x) for x in data[2]])
-    f2_0 = np.array([to_float(x) for x in data[5]])
-    
-    # Linear interp to energy vals
-    f1 = np.interp(energy, keV_0, f1_0)
-    f2 = np.interp(energy, keV_0, f2_0)
-    
-    return f1, f2
-
-
-def get_delta_beta(elem, energy, density):
-    """
-    Get energy-dependent phase (delta) and absorption (beta) parameters.
-
-    INPUTS:
-    elem - short element name (str)
-           e.g. for Hydrogen, elem='H'
-    energy - energies at which to evaluate factors 
-             (number or list/array of numbers)
-    density - element density in g/cm^3 (float)
-    
-    OUTPUTS:
-    delta, beta - arrays of scatter factors as function of energy
-    """
-    # Get some scaling values
-    A = get_amass(elem) # atomic mass
-    n_a = (10**6)*density*N_A/A               # number density
-    alpha = n_a*r_e/(2*pi)            # scale factor
-    wavelen = get_wavelen(energy)    # wavelengths [m]
-
-    # Get the scatter factors
-    f1, f2 = get_f1_f2(elem, energy)
-    delta = alpha * wavelen**2 * f1
-    beta = alpha * wavelen**2 * f2
-
-    return delta, beta
-
-
-
-
-# ## HANDLING MIXTURES - USE STOICHIOMETRIC WEIGHTING
-# ## Weighted average of atomic masses
-# ## Implemented following Jacobsen ch 3, eq'n 3.101-103
-
-
-def parse_matcomp(name):
-    """
-    Converts string of material composition to list of material names 
-    and a list of their weightings.
-    
-    INPUTS:
-    name - matcomp string, e.g. for water 'H(88.8)O(11.2)'
-
-    OUTPUTS:
-    matnames - list of individual element names, e.g. ['H','O']
-    weights - list of corresponding weights, e.g. [88.8, 11.2]
-    """
-    
-    matnames = []
-    weights = []
-
-    ii = 0
-    sub = name
-    lp = sub.find('(')
-    rp = sub.find(')')
-    while lp != -1:
-        matnames.append(sub[:lp])
-        weights.append(float(sub[(lp+1):rp]))
-        ii = rp+1
-        sub = sub[ii:]
-        lp = sub.find('(')
-        rp = sub.find(')')
-        
-    # Normalize weights
-    weights = np.array(weights)
-    weights = weights/np.sum(weights)
-    
-    return matnames, weights 
-
-
-def get_f1_f2_mix(matcomp, energy):
-    """
-    Get energy-dependent anomalous scatter factors for a mixture
-    of elements with given weighting factors.
-
-    INPUTS:
-    matcomp - material composition and weights (str)
-              e.g. for water 'H(88.8)O(11.2)'
-    energy - energies at which to evaluate factors 
-             (number or list/array of numbers)
-    
-    OUTPUTS:
-    f1, f2 - arrays of scatter factors as function of energy
-    """
-    matnames, weights = parse_matcomp(matcomp)
-    N_elems = len(matnames)
-    N_energy = np.array(energy).size
-    
-    if N_elems == 1:  # For one element, no need to mix
-        return get_f1_f2(matnames[0], energy)
-    
-    # Else get f1, f2 for each element
-    # Squeeze in case N_energy == 1
-    f1_elems_weighted = np.zeros([N_elems, N_energy]).squeeze()  
-    f2_elems_weighted = np.zeros([N_elems, N_energy]).squeeze()
-    for i in range(N_elems):
-        elem = matnames[i]
-        s_i = weights[i]
-        f1, f2 = get_f1_f2(elem, energy)
-        f1_elems_weighted[i] = s_i * f1
-        f2_elems_weighted[i] = s_i * f2
-
-    # Compute weighted averages as func of energy
-    f1_avg = np.sum(f1_elems_weighted, axis=0)
-    f2_avg = np.sum(f2_elems_weighted, axis=0)
-
-    return f1_avg, f2_avg
-
-
-def get_amass_mix(matcomp):
-    """
-    Finds the average atomic mass of a mixture.
-
-    INPUTS:
-    matcomp - material composition and weights (str)
-              e.g. for water 'H(88.8)O(11.2)'
-    
-    OUTPUTS:
-    amass - double specifiying avg atomic mass in grams per mole
-    """
-    matnames, weights = parse_matcomp(matcomp)
-    N_elems = len(matnames)
-
-    amass_elems_weighted = np.zeros(N_elems)
-    for i in range(N_elems):
-        elem = matnames[i]
-        s_i = weights[i]
-        amass = get_amass(elem)
-        amass_elems_weighted[i] = s_i * amass
-
-    # compute weighted average
-    amass = np.sum(amass_elems_weighted)
-
-    return amass
-
-
-
-def get_delta_beta_mix(matcomp, energy, density):
-    """
-    Get energy-dependent phase (delta) and absorption (beta) parameters
-    for a mixture of elements with given weighting factors.
-
-    INPUTS:
-    matcomp - material composition and weights (str)
-              e.g. for water 'H(88.8)O(11.2)'
-    energy - energies at which to evaluate factors 
-             (number or list/array of numbers)
-    density - element density in g/cm^3 (float)
-    
-    OUTPUTS:
-    delta, beta - arrays of scatter factors as function of energy
-    """
-    matnames, weights = parse_matcomp(matcomp)
-    N_elems = len(matnames)
-    N_energy = np.array(energy).size
-
-    # check for mixture or single
-    if N_elems == 1: # single element
-        elem = matnames[0]
-        A = get_amass(elem) # atomic mass
-        f1, f2 = get_f1_f2(elem, energy)
-    else:
-        A = get_amass_mix(matcomp)
-        f1, f2 = get_f1_f2_mix(matcomp, energy)
-
-    # some scale factors
-    n_a = (10**6)*density*N_A/A      # number density 
-    alpha = n_a*r_e/(2*pi)   # scale factor 
-    wavelen = get_wavelen(energy)    # wavelengths [m]
-
-    # compute the scatter factors
-    delta = alpha * wavelen**2 * f1
-    beta = alpha * wavelen**2 * f2
-
-    return delta, beta
-
-
-def mix_matcomp(matcomp1, density1, m1, matcomp2, density2, m2):
-    """
-    Mix two materials into one solution.
-    Assumptions: mi = sum[mi], Vi = sum[Vi]
-    x1, x2 = mass fractions of total solution
-    """
-    matnames1, weights1 = parse_matcomp(matcomp1)
-    matnames2, weights2 = parse_matcomp(matcomp2)
-    density = (m1 + m2)/((m1/density1) + (m2/density2))  # see assumptions
-    # density = 1/(x1/density1 + x2/density2)
-    
-    weights1_scaled = weights1*density1/density
-    weights2_scaled = weights2*density2/density
-
-    matnames = list(set(matnames1 + matnames2)) # unique materials
-    weights = np.zeros(len(matnames))
-    for i, mat in enumerate(matnames):
-        if mat in matnames1:
-            weights[i] += weights1_scaled[matnames1.index(mat)]
-        if mat in matnames2:
-            weights[i] += weights2_scaled[matnames2.index(mat)]
-
-    weights = weights/np.sum(weights)  # normalize weights
-
-    # make xcompy-style string
-    matcomp = ''.join([f'{mat}({weight:.6f})' for mat,weight in zip(matnames, weights)])
-    return matcomp, density
-
-
-def get_dbm_mix(matcomp, energy, density):
-    """
-    Get energy-dependent delta, beta, and mu (linear atten. coefficient)
-    for a mixture of elements with given weighting factors.
-    Note mu is just dependent on beta and the wavenumber for the energies.
-
-    INPUTS:
-    matcomp - material composition and weights (str)
-              e.g. for water 'H(88.8)O(11.2)'
-    energy - energies at which to evaluate factors 
-             (number or list/array of numbers)
-    density - element density in g/cm^3 (float)
-    
-    OUTPUTS:
-    delta, beta, mu - arrays of scatter factors as function of energy
-    """
-    delta, beta = get_delta_beta_mix(matcomp, energy, density)
-    wavenum = get_wavenum(energy)
-    mu = 2 * wavenum * beta
-    return delta, beta, mu
-
-
 class Material:
-    def __init__(self, name, matcomp, density):
+
+    def __init__(self, name, matcomp, density, k_blur=1.0, thresh=0.5, E_min=1.0, E_max=100.0):
+        """     
+        name: material identifier (str)
+        matcomp: NIST-style material composition and weights (str)
+                  e.g. for water 'H(88.8)O(11.2)'
+        density: element density in g/cm^3 (float)
+        """
+        # Material parameters
         self.name = name
         self.matcomp = matcomp
-        self.density = density
+        self.density = float(density)
 
-        # pre-calculate delta, beta at a representative range of energies to avoid file reloading
-        self.energy_range = jnp.linspace(1, 150, 150)
-        self.delta_range, self.beta_range = get_delta_beta_mix(matcomp, self.energy_range, density)
-        
+        # Phantom upsampling parameters -- tune to produce realistic morphology
+        self.k_blur = k_blur
+        self.thresh = thresh
+
+        # Convert NIST weight% matcomp to xraydb style:
+        self.formula_xraydb = self._wtpct_to_xraydb_formula(self.matcomp)
+
+        # Pre-calc delta/beta on an energy grid (keV) to avoid repeated xraydb calls
+        self.energy_range = np.arange(E_min, E_max, 1.0)  # keV
+        d_np, b_np = self._delta_beta_xraydb(np.asarray(self.energy_range))
+        self.delta_range = np.asarray(d_np)
+        self.beta_range = np.asarray(b_np)
+
+    @staticmethod
+    def _parse_matcomp_wtpct(matcomp: str):
+        """
+        Parse strings like 'H(10.2)C(14.3)...' into (elements, weights),
+        where weight percentages are normalized mass fractions summing to 1.
+        """
+        elems, wts = [], []
+
+        sub = matcomp.strip()
+        lp = sub.find("(")
+        rp = sub.find(")")
+
+        while lp != -1:
+            elems.append(sub[:lp])
+            wts.append(float(sub[lp + 1 : rp]))
+            sub = sub[rp + 1 :].strip()
+            lp = sub.find("(")
+            rp = sub.find(")")
+
+        wts = np.asarray(wts, dtype=float)
+        wts = wts / wts.sum()  # normalize to mass fractions
+        return elems, wts
+
+    @staticmethod
+    def _wtpct_to_xraydb_formula(matcomp_wtpct, scale=100.0, fmt='.8g'):
+        """
+        Convert NIST-style matcomp (weight percent) into xraydb-style chemical formula (atomic ratios)
+        """
+        elems, w = Material._parse_matcomp_wtpct(matcomp_wtpct)
+        A = np.array([xraydb.atomic_mass(el) for el in elems], dtype=float)  # g/mol
+        mol = w / A
+        mol_frac = mol / mol.sum()
+        coeff = mol_frac * float(scale)   # scale cancels out, helps with very tiny fractions
+        parts = [f'{el}{format(ci, fmt)}' for el, ci in zip(elems, coeff)]
+        return ''.join(parts)
+
+    def _delta_beta_xraydb(self, energy_keV):
+        """
+        energy_keV: numpy array of energies in keV
+        returns: (delta, beta) numpy arrays
+        """
+        energy_eV = 1e3 * np.asarray(energy_keV, dtype=float)
+        delta, beta, _atlen = xraydb.xray_delta_beta(self.formula_xraydb, self.density, energy_eV)
+        return np.asarray(delta, dtype=float), np.asarray(beta, dtype=float)
+
     def delta_beta(self, energy):
         """
-        Returns linearly interpolated delta and beta at the given energy.
+        Return (delta, beta) at energy [keV] via interpolation of precomputed grid.
+        Works for scalar or array-like energy.
         """
-        delta = jnp.interp(energy, self.energy_range, self.delta_range)
-        beta = jnp.interp(energy, self.energy_range, self.beta_range)
+        delta = np.interp(energy, self.energy_range, self.delta_range)
+        beta  = np.interp(energy, self.energy_range, self.beta_range)
         return delta, beta
 
 
-        
+
+## NIST material definitions -- https://physics.nist.gov/PhysRefData/XrayMassCoef/tab2.html
+nist_mc = {
+    'A-150 Tissue-Equivalent Plastic': 'H(0.101330)C(0.775498)N(0.035057)O(0.052315)F(0.017423)Ca(0.018377)',
+    'Adipose Tissue (ICRU-44)': 'H(0.114000)C(0.598000)N(0.007000)O(0.278000)Na(0.001000)S(0.001000)Cl(0.001000)',
+    'Air, Dry (near sea level)': 'C(0.000124)N(0.755268)O(0.231781)Ar(0.012827)',
+    'Alanine': 'H(0.079192)C(0.404437)N(0.157213)O(0.359157)',
+    'B-100 Bone-Equivalent Plastic': 'H(0.065473)C(0.536942)N(0.021500)O(0.032084)F(0.167415)Ca(0.176585)',
+    'Bakelite': 'H(0.057444)C(0.774589)O(0.167968)',
+    'Blood, Whole (ICRU-44)': 'H(0.102000)C(0.110000)N(0.033000)O(0.745000)Na(0.001000)P(0.001000)S(0.002000)Cl(0.003000)K(0.002000)Fe(0.001000)',
+    'Bone, Cortical (ICRU-44)': 'H(0.034000)C(0.155000)N(0.042000)O(0.435000)Na(0.001000)Mg(0.002000)P(0.103000)S(0.003000)Ca(0.225000)',
+    'Brain, Grey/White Matter (ICRU-44)': 'H(0.107000)C(0.145000)N(0.022000)O(0.712000)Na(0.002000)P(0.004000)S(0.002000)Cl(0.003000)K(0.003000)',
+    'Breast Tissue (ICRU-44)': 'H(0.106000)C(0.332000)N(0.030000)O(0.527000)Na(0.001000)P(0.001000)S(0.002000)Cl(0.001000)',
+    'C-552 Air-equivalent Plastic': 'H(0.024681)C(0.501610)O(0.004527)F(0.465209)Si(0.003973)',
+    'Cadmium Telluride': 'Cd(0.468358)Te(0.531642)',
+    'Calcium Fluoride': 'F(0.486672)Ca(0.513328)',
+    'Calcium Sulfate': 'O(0.470081)S(0.235534)Ca(0.294385)',
+    '15 mmol L-1 Ceric Ammonium Sulfate Solution': 'H(0.107694)N(0.000816)O(0.875172)S(0.014279)Ce(0.002040)',
+    'Cesium Iodide': 'I(0.488451)Cs(0.511549)',
+    'Concrete, Ordinary': 'H(0.022100)C(0.002484)O(0.574930)Na(0.015208)Mg(0.001266)Al(0.019953)Si(0.304627)K(0.010045)Ca(0.042951)Fe(0.006435)',
+    'Concrete, Barite (TYPE BA)': 'H(0.003585)O(0.311622)Mg(0.001195)Al(0.004183)Si(0.010457)S(0.107858)Ca(0.050194)Fe(0.047505)Ba(0.463400)',
+    'Eye Lens (ICRU-44)': 'H(0.096000)C(0.195000)N(0.057000)O(0.646000)Na(0.001000)P(0.001000)S(0.003000)Cl(0.001000)',
+    'Ferrous Sulfate Standard Fricke': 'H(0.108376)O(0.878959)Na(0.000022)S(0.012553)Cl(0.000035)Fe(0.000055)',
+    'Gadolinium Oxysulfide': 'O(0.084527)S(0.084704)Gd(0.830769)',
+    'Gafchromic Sensor': 'H(0.089700)C(0.605800)N(0.112200)O(0.192300)',
+    'Gallium Arsenide': 'Ga(0.482030)As(0.517970)',
+    'Glass, Borosilicate (Pyrex)': 'B(0.040066)O(0.539559)Na(0.028191)Al(0.011644)Si(0.377220)K(0.003321)',
+    'Glass, Lead': 'O(0.156453)Si(0.080866)Ti(0.008092)As(0.002651)Pb(0.751938)',
+    'Lithium Fluride': 'Li(0.267585)F(0.732415)',
+    'Lithium Tetraborate': 'Li(0.082081)B(0.255715)O(0.662204)',
+    'Lung Tissue (ICRU-44)': 'H(0.103000)C(0.105000)N(0.031000)O(0.749000)Na(0.002000)P(0.002000)S(0.003000)Cl(0.003000)K(0.002000)',
+    'Magnesium Tetroborate': 'B(0.240870)O(0.623762)Mg(0.135367)',
+    'Mercuric Iodide': 'I(0.558560)Hg(0.441440)',
+    'Muscle, Skeletal (ICRU-44)': 'H(0.102000)C(0.143000)N(0.034000)O(0.710000)Na(0.001000)P(0.002000)S(0.003000)Cl(0.001000)K(0.004000)',
+    'Ovary (ICRU-44)': 'H(0.105000)C(0.093000)N(0.024000)O(0.768000)Na(0.002000)P(0.002000)S(0.002000)Cl(0.002000)K(0.002000)',
+    'Photographic Emulsion (Kodak Type AA)': 'H(0.030500)C(0.210700)N(0.072100)O(0.163200)Br(0.222800)Ag(0.300700)',
+    'Photographic Emulsion (Standard Nuclear)': 'H(0.014100)C(0.072261)N(0.019320)O(0.066101)S(0.001890)Br(0.349104)Ag(0.474105)I(0.003120)',
+    'Plastic Scintillator, Vinyltoluene': 'H(0.085000)C(0.915000)',
+    'Polyethylene': 'H(0.143716)C(0.856284)',
+    'Polyethylene Terephthalate, (Mylar)': 'H(0.041960)C(0.625016)O(0.333024)',
+    'Polymethyl Methacrylate': 'H(0.080541)C(0.599846)O(0.319613)',
+    'Polystyrene': 'H(0.077421)C(0.922579)',
+    'Polytetrafluoroethylene, (Teflon)': 'C(0.240183)F(0.759818)',
+    'Polyvinyl Chloride': 'H(0.048382)C(0.384361)Cl(0.567257)',
+    'Radiochromic Dye Film, Nylon Base': 'H(0.101996)C(0.654396)N(0.098915)O(0.144693)',
+    'Testis (ICRU-44)': 'H(0.106000)C(0.099000)N(0.020000)O(0.766000)Na(0.002000)P(0.001000)S(0.002000)Cl(0.002000)K(0.002000)',
+    'Tissue, Soft (ICRU-44)': 'H(0.102000)C(0.143000)N(0.034000)O(0.708000)Na(0.002000)P(0.003000)S(0.003000)Cl(0.002000)K(0.003000)',
+    'Tissue, Soft (ICRU Four-Component)': 'H(0.101174)C(0.111000)N(0.026000)O(0.761826)',
+    'Tissue-Equivalent Gas, Methane Based': 'H(0.101873)C(0.456177)N(0.035172)O(0.406778)',
+    'Tissue-Equivalent Gas, Propane Based': 'H(0.102676)C(0.568937)N(0.035022)O(0.293365)',
+    'Water, Liquid': 'H(0.111898)O(0.888102)',
+}
 
 
+## Breast microcalcification material compositions, two types:
+calc_mc = {
+    'Calcium Oxalate (Dihydrate)': 'Ca(24.43)C(14.64)O(58.49)H(2.44)',  # type 1, density ~ 2.0 g/cm3
+    'Hydroxyapatite': 'Ca(39.89)P(18.50)O(41.41)H(0.20)',   # type 2, density ~ 3.1 g/cm3
 
+}
 
-    
+## VICTRE phantom materials, mapping given voxelId to NIST chemical compositions.
+##   Based on pipeline defaults -- https://github.com/DIDSR/VICTRE_PIPELINE/blob/main/Victre/Constants.py
+##   and densities used in -- https://github.com/DIDSR/VICTRE_MCGPU/blob/master/MC-GPU_v1.5b_sample_mammo_and_DBT_simulation_InputDensity.in
+victre_matdict = {  
+    0: Material(
+        'air', 
+        density = 0.0012,
+        matcomp = nist_mc['Air, Dry (near sea level)'],
+    ),
+    1: Material(
+        'adipose', 
+        density = 0.92,
+        matcomp = nist_mc['Adipose Tissue (ICRU-44)'],
+        k_blur = 1.5, 
+    ),
+    2: Material(
+        'skin', 
+        density = 1.09,
+        matcomp = nist_mc['Tissue, Soft (ICRU-44)'],
+        k_blur = 0.6
+    ),
+    29: Material(
+        'glandular',
+        density = 1.035,
+        matcomp = nist_mc['Breast Tissue (ICRU-44)'],
+    ),
+    33: Material(
+        'nipple',
+        density = 1.09,
+        matcomp = nist_mc['Tissue, Soft (ICRU-44)'],
+    ),
+    40: Material(
+        'muscle',
+        density = 1.05,
+        matcomp = nist_mc['Muscle, Skeletal (ICRU-44)'],
+    ),
+    50: Material(
+        'paddle',
+        density = 1.06,
+        matcomp = nist_mc['Polystyrene'],
+    ),
+    88: Material(
+        'ligament', 
+        density = 1.12,
+        matcomp = nist_mc['Tissue, Soft (ICRU-44)'],
+        thresh = 0.2
+    ),
+    95: Material(
+        'TDLU',
+        density = 1.05,
+        matcomp = nist_mc['Muscle, Skeletal (ICRU-44)'],
+    ),
+    125: Material(
+        'duct', 
+        density = 1.05,
+        matcomp = nist_mc['Muscle, Skeletal (ICRU-44)'],
+        thresh = 0.5
+    ),
+    150: Material(
+        'artery',
+        density = 1.0,
+        matcomp = nist_mc['Blood, Whole (ICRU-44)'],
+    ),
+    200: Material(
+        'spiculated',
+        density = 1.06,
+        matcomp = nist_mc['Breast Tissue (ICRU-44)'],
+    ),
+    225: Material(
+        'vein',
+        density = 1.0,
+        matcomp = nist_mc['Blood, Whole (ICRU-44)'],
+    ),
+    250: Material(
+        'clustercalc', 
+        density = 2.0,
+        matcomp = calc_mc['Calcium Oxalate (Dihydrate)'], 
+        k_blur = 0.5, 
+        thresh = 0.5
+    ),
+}
+
