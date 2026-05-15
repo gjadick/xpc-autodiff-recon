@@ -160,6 +160,11 @@ class Material:
         self.delta_range = np.asarray(d_np)
         self.beta_range = np.asarray(b_np)
 
+        # Add jnp versions
+        self.jnp_energy_range = jnp.asarray(self.energy_range, dtype=jnp.float32)
+        self.jnp_delta_range = jnp.asarray(self.delta_range, dtype=jnp.float32)
+        self.jnp_beta_range = jnp.asarray(self.beta_range, dtype=jnp.float32)
+
     @staticmethod
     def _parse_matcomp_wtpct(matcomp: str):
         """
@@ -214,7 +219,15 @@ class Material:
         beta  = np.interp(energy, self.energy_range, self.beta_range)
         return delta, beta
 
-
+    def delta_beta_jnp(self, energy):
+        """
+        Return (delta, beta) at energy [keV] via interpolation of precomputed grid.
+        Works for scalar or array-like energy.
+        """
+        delta = jnp.interp(energy, self.jnp_energy_range, self.jnp_delta_range)
+        beta  = jnp.interp(energy, self.jnp_energy_range, self.jnp_beta_range)
+        return delta, beta
+        
 
 ## NIST material definitions -- https://physics.nist.gov/PhysRefData/XrayMassCoef/tab2.html
 nist_mc = {
